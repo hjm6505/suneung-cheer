@@ -7,7 +7,8 @@
 const { clamp, smooth, lerp, drawSky, fireState, growMask, drawIgnite, pieceAt, drawSpark } = window.SC;
 const QS = new URLSearchParams(location.search), SMALL = QS.get('small') === '1'; // ?small=1 = 미리보기 영상 뽑기용 작은 판(360×640), ?vb= ?ab= 담는 굵기
 const BW = 1080, BH = 1920, W = SMALL ? 360 : 720, H = SMALL ? 640 : 1280, S = W / BW;
-const DRAFT_KEY = 'cheer-video-draft-v2-', VER_KEY = 'cheer-video-ver', OUT_NAME = '응원영상';
+const DRAFT_KEY = 'cheer-video-draft-v2-', VER_KEY = 'cheer-video-ver', OUT_NAME = '수능응원영상';
+let outName = OUT_NAME + '.mp4'; // 만들 때마다 「수능응원영상_시분.mp4」로 정한다(다운로드 폴더에서 찾기 쉽게)
 // 세 판 — 판마다 cuts 파일 하나, 초안도 판마다 따로
 const VERS = [{ id: 'mom1', name: '엄마 영상 1', file: 'cuts-mom1.json', n: 14 }, { id: 'mom2', name: '엄마 영상 2', file: 'cuts-mom2.json', n: 14 }, { id: 'family', name: '교회 가족 영상', file: 'cuts-family.json', n: 15 }];
 const LISTS = {}; let VER = null, TAGS = null, HOLD = 0, FULL = 115.2, TAGSEGS = null;
@@ -264,17 +265,18 @@ async function showResult(res) {
   $('outcap').textContent = (res.sound ? '' : '이 폰에서는 소리를 담지 못해 소리 없는 영상입니다. ') + (wentHidden ? '만드는 동안 화면이 가려져 불 움직임이 끊겼을 수 있습니다. ' : '');
   v.onloadedmetadata = () => log('만든 영상 열림: ' + v.videoWidth + '×' + v.videoHeight + ' · ' + v.duration.toFixed(1) + '초'); v.onerror = () => log('만든 영상을 이 기기가 틀지 못함');
   v.loop = false; v.onended = () => log('결과 영상 끝남(마지막 화면에 머묾, 되감지 않음)'); // 끝나면 마지막 화면에 머문다 — 되돌려 틀지 않는다
-  const file = (() => { try { return new File([outBlob], OUT_NAME + '.' + outExt, { type: outBlob.type || 'video/mp4' }); } catch (e) { return null; } })();
+  { const d = new Date(), p2 = n => String(n).padStart(2, '0'); outName = OUT_NAME + '_' + p2(d.getHours()) + p2(d.getMinutes()) + '.' + outExt; }
+  const file = (() => { try { return new File([outBlob], outName, { type: outBlob.type || 'video/mp4' }); } catch (e) { return null; } })();
   let canShare = false; try { canShare = !!(file && navigator.canShare && navigator.canShare({ files: [file] })); } catch (e) {}
   let dl = null; try { dl = await window.claude?.use?.('downloads'); } catch (e) {}
   const canSave = !!dl || !window.claude; // claude 자리인데 downloads 가 없으면 저장 단추 없음(길게 눌러 저장)
   log('보내기(공유 창): ' + (canShare ? '됨' : '안 됨') + ' · 저장: ' + (dl ? 'downloads' : (canSave ? '내려받기 링크' : '없음')));
-  const bs = $('share'), bv = $('save'); bs.hidden = !canShare; bv.hidden = !canSave; bv.classList.toggle('second', canShare); $('holdhint').hidden = canShare || canSave;
+  const bs = $('share'), bv = $('save'); bs.hidden = !canShare; bv.hidden = !canSave; bv.classList.toggle('second', canShare); $('holdhint').hidden = canShare || canSave; $('sharehint').hidden = !canShare;
   bs.onclick = async () => { try { await navigator.share({ files: [file] }); log('보내기: 공유 창 닫힘(보냄)'); next('보냈습니다.'); } catch (e) { log('보내기: ' + (e.name || e.message)); if (e.name !== 'AbortError') { next('보내기가 되지 않았습니다. 아래 「이 폰에 저장」을 눌러 주세요.', true); bv.classList.remove('second'); } } };
   bv.onclick = async () => {
-    const name = OUT_NAME + '.' + outExt;
-    if (dl) { try { await dl.save({ filename: name, data: outBlob }); log('저장: 됨'); next('저장했습니다. 카톡에서 보낼 사람의 채팅방을 열고, 글 쓰는 칸 왼쪽의 「+」를 누르세요. 맨 위 그림 줄에 방금 만든 영상이 보입니다. 그 영상을 누르고 보내면 됩니다.'); } catch (e) { log('저장: 안 됨 — ' + (e.code || e.message)); if (e.code === 'declined') next('저장을 취소했습니다. 다시 누르면 저장됩니다.', true); else { next('저장이 되지 않았습니다. 위 영상을 길게 눌러 저장해 주세요.', true); } } }
-    else { const a = document.createElement('a'); a.href = outURL; a.download = name; a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove(); log('저장: 내려받기 링크 누름'); next('저장했습니다. 카톡에서 보낼 사람의 채팅방을 열고, 글 쓰는 칸 왼쪽의 「+」를 누르세요. 맨 위 그림 줄에 방금 만든 영상이 보입니다. 그 영상을 누르고 보내면 됩니다.'); }
+    const name = outName;
+    if (dl) { try { await dl.save({ filename: name, data: outBlob }); log('저장: 됨'); savedNote(name); } catch (e) { log('저장: 안 됨 — ' + (e.code || e.message)); if (e.code === 'declined') next('저장을 취소했습니다. 다시 누르면 저장됩니다.', true); else { next('저장이 되지 않았습니다. 위 영상을 길게 눌러 저장해 주세요.', true); } } }
+    else { const a = document.createElement('a'); a.href = outURL; a.download = name; a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove(); log('저장: 내려받기 링크 누름'); savedNote(name); }
   };
   // 저절로 재생: 소리 켠 채로 먼저, 막히면 소리 끄고 재생 + 「소리 켜기」
   v.muted = false; let how = '소리 켜고 재생';
@@ -283,7 +285,13 @@ async function showResult(res) {
   $('sound').onclick = () => { v.muted = false; v.play().catch(() => {}); $('sound').hidden = true; };
   $('result').scrollIntoView({ block: 'start', behavior: 'smooth' }); try { $('resTitle').focus({ preventScroll: true }); } catch (e) {}
 }
-function next(s, bad) { const n = $('next'); n.textContent = s; n.style.color = bad ? 'var(--warn)' : ''; n.hidden = false; }
+function next(s, bad) { const n = $('next'); n.textContent = ''; n.className = ''; (Array.isArray(s) ? s : [s]).forEach((t, i) => { const p = el(i === 0 ? 'strong' : 'span', i === 0 ? 'n0' : 'n1', t); n.appendChild(p); }); if (Array.isArray(s)) n.className = 'steps'; n.style.color = bad ? 'var(--warn)' : ''; n.hidden = false; }
+const IS_ANDROID = /Android/i.test(navigator.userAgent) || new URLSearchParams(location.search).get('android') === '1'; // ?android=1 은 시험용
+function savedNote(name) {
+  if (!IS_ANDROID) { next('저장했습니다. 카톡에서 보낼 사람의 채팅방을 열고, 글 쓰는 칸 왼쪽의 「+」를 누르세요. 맨 위 그림 줄에 방금 만든 영상이 보입니다. 그 영상을 누르고 보내면 됩니다.'); return; }
+  next(['저장했습니다.', '「다운로드」 폴더에 「' + name + '」 이름으로 들어 있습니다.', '카톡으로 보내는 길 ①  채팅방의 「+」 → 「파일」 → 다운로드에서 고르기', '카톡으로 보내는 길 ②  「내 파일」 앱 → 다운로드 → 영상을 길게 눌러 「공유」 → 카카오톡', '「+」 맨 위 그림 줄에는 안 보일 수 있습니다.']);
+  try { $('next').scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+}
 
 // ── 컷 카드
 const KIND = { big: '큰 글씨 (호박빛)', body: '본문', small: '작은 글씨' };
