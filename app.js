@@ -5,7 +5,8 @@
 (() => {
 'use strict';
 const { clamp, smooth, lerp, drawSky, fireState, growMask, drawIgnite, pieceAt, drawSpark } = window.SC;
-const BW = 1080, BH = 1920, W = 720, H = 1280, S = W / BW;
+const QS = new URLSearchParams(location.search), SMALL = QS.get('small') === '1'; // ?small=1 = 미리보기 영상 뽑기용 작은 판(360×640), ?vb= ?ab= 담는 굵기
+const BW = 1080, BH = 1920, W = SMALL ? 360 : 720, H = SMALL ? 640 : 1280, S = W / BW;
 const DRAFT_KEY = 'cheer-video-draft-v2-', VER_KEY = 'cheer-video-ver', OUT_NAME = '응원영상';
 // 세 판 — 판마다 cuts 파일 하나, 초안도 판마다 따로
 const VERS = [{ id: 'mom1', name: '엄마 영상 1', file: 'cuts-mom1.json', n: 14 }, { id: 'mom2', name: '엄마 영상 2', file: 'cuts-mom2.json', n: 14 }, { id: 'family', name: '교회 가족 영상', file: 'cuts-family.json', n: 15 }];
@@ -13,7 +14,7 @@ const LISTS = {}; let VER = null, TAGS = null, HOLD = 0, FULL = 115.2, TAGSEGS =
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const mk = (w, h, o) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return [c, c.getContext('2d', o)]; };
-const cv = $('cv'), g = cv.getContext('2d');
+const cv = $('cv'); cv.width = W; cv.height = H; const g = cv.getContext('2d');
 const [fc, fg] = mk(W, H), [hc, hg] = mk(W, H), [pc, pg] = mk(8, 8, { willReadFrequently: true }), [, mg] = mk(8, 8);
 const R = x => { x.setTransform(S, 0, 0, S, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = 'source-over'; };
 const HASLS = 'letterSpacing' in mg;
@@ -172,10 +173,10 @@ async function buildAudio() {
 async function viaWebCodecs(audio) {
   if (!('VideoEncoder' in window) || typeof Mp4Muxer === 'undefined') throw new Error('이 기기에 VideoEncoder 또는 묶는 도구가 없음');
   let cfg = null;
-  for (const codec of ['avc1.42001f', 'avc1.4d001f', 'avc1.640028']) { const c = { codec, width: W, height: H, bitrate: 2_000_000, framerate: FPS }; try { const r = await VideoEncoder.isConfigSupported(c); if (r.supported) { cfg = c; break; } } catch (e) {} }
+  for (const codec of ['avc1.42001f', 'avc1.4d001f', 'avc1.640028']) { const c = { codec, width: W, height: H, bitrate: +QS.get('vb') || 2_000_000, framerate: FPS }; try { const r = await VideoEncoder.isConfigSupported(c); if (r.supported) { cfg = c; break; } } catch (e) {} }
   if (!cfg) throw new Error('H.264 인코더 설정이 지원되지 않음');
   let acfg = null, amux = null;
-  if (audio && 'AudioEncoder' in window) for (const [codec, m] of [['mp4a.40.2', 'aac'], ['opus', 'opus']]) { const c = { codec, sampleRate: 48000, numberOfChannels: 2, bitrate: 128000 }; try { const r = await AudioEncoder.isConfigSupported(c); if (r.supported) { acfg = c; amux = m; break; } } catch (e) {} }
+  if (audio && 'AudioEncoder' in window) for (const [codec, m] of [['mp4a.40.2', 'aac'], ['opus', 'opus']]) { const c = { codec, sampleRate: 48000, numberOfChannels: 2, bitrate: +QS.get('ab') || 128000 }; try { const r = await AudioEncoder.isConfigSupported(c); if (r.supported) { acfg = c; amux = m; break; } } catch (e) {} }
   log('그림: ' + cfg.codec + ' · 소리: ' + (acfg ? acfg.codec : (audio ? '담는 도구 없음 → 소리 없는 판' : '없음')));
   const mopt = { target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: 'avc', width: W, height: H, frameRate: FPS }, fastStart: 'in-memory', firstTimestampBehavior: 'offset' };
   if (acfg) mopt.audio = { codec: amux, numberOfChannels: 2, sampleRate: 48000 };
@@ -385,7 +386,7 @@ let stageVisible = true, lastDraw = 0; const calm = window.matchMedia && matchMe
 let thumbQ = [], thumbTry = 0;
 function queueThumbs(ids) { for (const id of ids) if (id !== sel && !thumbQ.includes(id)) thumbQ.push(id); }
 function tick(now) {
-  requestAnimationFrame(tick); if (busy || !P) return; const cut = CUTS.find(c => c.id === sel); if (!cut) return;
+  requestAnimationFrame(tick); if (busy || !P || prevOpen) return; const cut = CUTS.find(c => c.id === sel); if (!cut) return;
   if (!dirty && thumbQ.length) { const c = CUTS.find(x => x.id === thumbQ[0]); if (!c) { thumbQ.shift(); return; } const t = prevTime(c); ensure(t); const n = need(t), ok = (!n.hi || HI.v[HI.cur].readyState >= 2) && (!n.low || LOW.v[LOW.cur].readyState >= 2);
     if (ok || ++thumbTry > 40) { draw(t); c.thumbLive = true; const x = c.thumb.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(cv, 0, 0, 144, 256); thumbQ.shift(); thumbTry = 0; if (!thumbQ.length) dirty = true; } return; }
   const live = stageVisible && !document.hidden && !calm; if (!dirty && (!live || now - lastDraw < 80)) { if (!live) { HI.stop(); LOW.stop(); } return; }
@@ -401,26 +402,28 @@ async function loadVersion(id) {
   { const q = +new URLSearchParams(location.search).get('sec'); if (q > 0) TOTAL = Math.min(TOTAL, q); } // 시험용: ?sec=8 이면 앞 8초만 만든다(끝 멈춤은 그대로 붙음)
   if (first) { for (const c of CUTS) { c.items = parseItems(c); c.main0 = c.items.filter(it => it.k !== 'small').length; if (c.bubble) c.bubble.t0 = c.bubble.t; } if (TAGS) for (const k in TAGS.people) TAGS.people[k].label0 = TAGS.people[k].label; loadDraft(); }
   if (!HI) { HI = new Loop(P.fire, P.loopFrom || 0); LOW = new Loop(P.fireLow, P.lowFrom || 0); await Promise.all([HI.load(), LOW.load()]); log('불 영상: ' + HI.v[0].videoWidth + '×' + HI.v[0].videoHeight + ' ' + (HI.v[0].duration || 0).toFixed(2) + '초 · 낮은 불 ' + (LOW.v[0].duration || 0).toFixed(2) + '초'); }
-  for (const b of document.querySelectorAll('#pick button[data-ver]')) { const on = b.dataset.ver === VER; b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.classList.toggle('on', on); }
+  for (const b of document.querySelectorAll('#pick button[data-ver]')) { const on = b.dataset.ver === VER; b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.classList.toggle('on', on); b.textContent = on ? '고름' : '고르기'; b.setAttribute('aria-label', (VERS.find(v => v.id === b.dataset.ver) || {}).name + (on ? ' — 지금 고른 영상' : ' 고르기')); }
   $('tagsAll').hidden = !TAGS;
   $('cardsTitle').textContent = V.name + ' — 컷 ' + CUTS.length + '장'; $('keep').textContent = '화면을 켜 두세요. ' + (FULL > 118 ? '2분 조금 넘게' : '2분쯤') + ' 걸립니다. 다른 앱으로 가면 멈출 수 있습니다.';
   buildCards(); select(1); thumbQ = []; queueThumbs(CUTS.filter(c => cutChanged(c)).map(c => c.id)); try { localStorage.setItem(VER_KEY, VER); } catch (e) {}
   log('판: ' + V.name + ' · ' + FULL + '초 + 끝 멈춤 ' + HOLD + '초 · 컷 ' + CUTS.length);
 }
-// ── 판 미리보기: 고르기 전에 그 판의 모든 컷 장면(원래 문구가 얹힌 작은 그림)을 한 화면에 펼쳐 보여 준다. 이미 꾸러미에 든 그림을 쓰므로 누르면 바로 뜬다.
-let prevOpener = null, prevVer = null;
+// ── 판 미리보기 영상: 세 판의 미리보기(원래 문구·음악·장작 소리, 끝 멈춤까지 전체 길이)를 맨 위에 나란히 둔다. 누르면 크게 틀고, 누를 때만 받는다(한 번에 한 편만 — 틀개가 하나다).
+let prevOpener = null, prevVer = null, prevOpen = false;
 function openPrev(id, opener) {
-  const V = VERS.find(v => v.id === id); if (!V || busy) return; prevOpener = opener || null; prevVer = id;
-  $('prevTitle').textContent = V.name + ' 미리보기'; const grid = $('prevGrid'); grid.textContent = '';
-  for (let i = 1; i <= V.n; i++) { const f = el('figure', 'prevcut'), im = document.createElement('img'); im.src = 'thumbs/' + id + '-c' + String(i).padStart(2, '0') + '.jpg'; im.alt = V.name + ' 컷 ' + i + ' 장면'; im.width = 320; im.height = 568; im.loading = i > 4 ? 'lazy' : 'eager'; im.decoding = 'async'; f.appendChild(im); f.appendChild(el('figcaption', '', '컷 ' + i)); grid.appendChild(f); }
-  $('prevPick').textContent = id === VER ? '닫고 이 영상 고치기' : '이 영상 고르기';
+  const V = VERS.find(v => v.id === id); if (!V || busy) return; prevOpener = opener || null; prevVer = id; prevOpen = true; if (HI) HI.stop(); if (LOW) LOW.stop();
+  $('prevTitle').textContent = V.name + ' 미리보기'; $('prevNote').textContent = ''; $('prevPick').textContent = id === VER ? '닫고 이 영상 고치기' : '이 영상 고르기';
+  const v = $('prevVideo'); v.poster = 'thumbs/' + id + '-c01.jpg'; v.src = 'prev-' + id + '.mp4'; v.muted = false; v.loop = false;
   $('prev').hidden = false; $('prev').scrollTop = 0; document.body.style.overflow = 'hidden'; try { $('prevClose').focus({ preventScroll: true }); } catch (e) {}
+  v.play().catch(() => { v.muted = true; v.play().catch(() => { $('prevNote').textContent = '영상 가운데의 ▶ 를 눌러 틀어 주세요.'; }); }); // 소리 켠 채 먼저, 막히면 소리 끄고
 }
-function closePrev() { if ($('prev').hidden) return; $('prev').hidden = true; document.body.style.overflow = ''; $('prevGrid').textContent = ''; try { if (prevOpener) prevOpener.focus({ preventScroll: true }); } catch (e) {} prevOpener = null; }
+function closePrev() { if ($('prev').hidden) return; const v = $('prevVideo'); try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {} $('prev').hidden = true; document.body.style.overflow = ''; prevOpen = false; dirty = true; try { if (prevOpener) prevOpener.focus({ preventScroll: true }); } catch (e) {} prevOpener = null; }
 function initPrev() {
-  for (const b of document.querySelectorAll('#pick button[data-prev]')) b.addEventListener('click', () => openPrev(b.dataset.prev, b));
+  for (const b of document.querySelectorAll('#pick [data-prev]')) b.addEventListener('click', () => openPrev(b.dataset.prev, b));
   $('prevClose').addEventListener('click', closePrev);
-  $('prevPick').addEventListener('click', () => { const id = prevVer; closePrev(); if (id && id !== VER && !busy) loadVersion(id).catch(e => { setCap('그 영상을 불러오지 못했습니다.'); log('판 불러오기 실패: ' + (e.message || e.name)); }); $('pick').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
+  $('prevVideo').addEventListener('error', () => { if (prevOpen) $('prevNote').textContent = '미리보기 영상을 불러오지 못했습니다. 닫고 다시 눌러 주세요.'; });
+  $('prevVideo').addEventListener('ended', () => { if (prevOpen) $('prevNote').textContent = '끝까지 보셨습니다. 마음에 들면 아래 단추로 고르세요.'; });
+  $('prevPick').addEventListener('click', () => { const id = prevVer; closePrev(); if (id && id !== VER && !busy) loadVersion(id).catch(e => { setCap('그 영상을 불러오지 못했습니다.'); log('판 불러오기 실패: ' + (e.message || e.name)); }); $('stage').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closePrev(); });
 }
 async function init() {
