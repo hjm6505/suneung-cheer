@@ -8,7 +8,7 @@ const { clamp, smooth, lerp, drawSky, fireState, growMask, drawIgnite, pieceAt, 
 const BW = 1080, BH = 1920, W = 720, H = 1280, S = W / BW;
 const DRAFT_KEY = 'cheer-video-draft-v2-', VER_KEY = 'cheer-video-ver', OUT_NAME = '응원영상';
 // 세 판 — 판마다 cuts 파일 하나, 초안도 판마다 따로
-const VERS = [{ id: 'mom1', name: '엄마 영상 1', file: 'cuts-mom1.json' }, { id: 'mom2', name: '엄마 영상 2', file: 'cuts-mom2.json' }, { id: 'family', name: '교회 가족 영상', file: 'cuts-family.json' }];
+const VERS = [{ id: 'mom1', name: '엄마 영상 1', file: 'cuts-mom1.json', n: 14 }, { id: 'mom2', name: '엄마 영상 2', file: 'cuts-mom2.json', n: 14 }, { id: 'family', name: '교회 가족 영상', file: 'cuts-family.json', n: 15 }];
 const LISTS = {}; let VER = null, TAGS = null, HOLD = 0, FULL = 115.2, TAGSEGS = null;
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -401,11 +401,27 @@ async function loadVersion(id) {
   { const q = +new URLSearchParams(location.search).get('sec'); if (q > 0) TOTAL = Math.min(TOTAL, q); } // 시험용: ?sec=8 이면 앞 8초만 만든다(끝 멈춤은 그대로 붙음)
   if (first) { for (const c of CUTS) { c.items = parseItems(c); c.main0 = c.items.filter(it => it.k !== 'small').length; if (c.bubble) c.bubble.t0 = c.bubble.t; } if (TAGS) for (const k in TAGS.people) TAGS.people[k].label0 = TAGS.people[k].label; loadDraft(); }
   if (!HI) { HI = new Loop(P.fire, P.loopFrom || 0); LOW = new Loop(P.fireLow, P.lowFrom || 0); await Promise.all([HI.load(), LOW.load()]); log('불 영상: ' + HI.v[0].videoWidth + '×' + HI.v[0].videoHeight + ' ' + (HI.v[0].duration || 0).toFixed(2) + '초 · 낮은 불 ' + (LOW.v[0].duration || 0).toFixed(2) + '초'); }
-  for (const b of document.querySelectorAll('#pick button')) { const on = b.dataset.ver === VER; b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.classList.toggle('on', on); }
+  for (const b of document.querySelectorAll('#pick button[data-ver]')) { const on = b.dataset.ver === VER; b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.classList.toggle('on', on); }
   $('tagsAll').hidden = !TAGS;
   $('cardsTitle').textContent = V.name + ' — 컷 ' + CUTS.length + '장'; $('keep').textContent = '화면을 켜 두세요. ' + (FULL > 118 ? '2분 조금 넘게' : '2분쯤') + ' 걸립니다. 다른 앱으로 가면 멈출 수 있습니다.';
   buildCards(); select(1); thumbQ = []; queueThumbs(CUTS.filter(c => cutChanged(c)).map(c => c.id)); try { localStorage.setItem(VER_KEY, VER); } catch (e) {}
   log('판: ' + V.name + ' · ' + FULL + '초 + 끝 멈춤 ' + HOLD + '초 · 컷 ' + CUTS.length);
+}
+// ── 판 미리보기: 고르기 전에 그 판의 모든 컷 장면(원래 문구가 얹힌 작은 그림)을 한 화면에 펼쳐 보여 준다. 이미 꾸러미에 든 그림을 쓰므로 누르면 바로 뜬다.
+let prevOpener = null, prevVer = null;
+function openPrev(id, opener) {
+  const V = VERS.find(v => v.id === id); if (!V || busy) return; prevOpener = opener || null; prevVer = id;
+  $('prevTitle').textContent = V.name + ' 미리보기'; const grid = $('prevGrid'); grid.textContent = '';
+  for (let i = 1; i <= V.n; i++) { const f = el('figure', 'prevcut'), im = document.createElement('img'); im.src = 'thumbs/' + id + '-c' + String(i).padStart(2, '0') + '.jpg'; im.alt = V.name + ' 컷 ' + i + ' 장면'; im.width = 320; im.height = 568; im.loading = i > 4 ? 'lazy' : 'eager'; im.decoding = 'async'; f.appendChild(im); f.appendChild(el('figcaption', '', '컷 ' + i)); grid.appendChild(f); }
+  $('prevPick').textContent = id === VER ? '닫고 이 영상 고치기' : '이 영상 고르기';
+  $('prev').hidden = false; $('prev').scrollTop = 0; document.body.style.overflow = 'hidden'; try { $('prevClose').focus({ preventScroll: true }); } catch (e) {}
+}
+function closePrev() { if ($('prev').hidden) return; $('prev').hidden = true; document.body.style.overflow = ''; $('prevGrid').textContent = ''; try { if (prevOpener) prevOpener.focus({ preventScroll: true }); } catch (e) {} prevOpener = null; }
+function initPrev() {
+  for (const b of document.querySelectorAll('#pick button[data-prev]')) b.addEventListener('click', () => openPrev(b.dataset.prev, b));
+  $('prevClose').addEventListener('click', closePrev);
+  $('prevPick').addEventListener('click', () => { const id = prevVer; closePrev(); if (id && id !== VER && !busy) loadVersion(id).catch(e => { setCap('그 영상을 불러오지 못했습니다.'); log('판 불러오기 실패: ' + (e.message || e.name)); }); $('pick').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closePrev(); });
 }
 async function init() {
   try {
@@ -416,8 +432,9 @@ async function init() {
     if (!('VideoEncoder' in window) || new URLSearchParams(location.search).get('nowc')) $('nowc').hidden = false; // 카톡 안 화면처럼 영상 담는 도구가 없는 곳: 맨 위에 다른 브라우저로 열라는 안내(?nowc=1 은 시험용)
     let want = new URLSearchParams(location.search).get('ver'); if (!want) { try { want = localStorage.getItem(VER_KEY); } catch (e) {} }
     await loadVersion(want || 'mom1');
-    for (const b of document.querySelectorAll('#pick button')) b.addEventListener('click', () => { if (busy || b.dataset.ver === VER) return; loadVersion(b.dataset.ver).catch(e => { setCap('그 판을 불러오지 못했습니다.'); log('판 불러오기 실패: ' + (e.message || e.name)); }); });
+    for (const b of document.querySelectorAll('#pick button[data-ver]')) b.addEventListener('click', () => { if (busy || b.dataset.ver === VER) return; loadVersion(b.dataset.ver).catch(e => { setCap('그 판을 불러오지 못했습니다.'); log('판 불러오기 실패: ' + (e.message || e.name)); }); });
     $('tagsAll').addEventListener('click', () => { if (busy || !TAGS) return; const hide = $('tagsAll').dataset.next !== 'show'; for (const k in TAGS.people) setTagHide(TAGS.people[k], hide); saveDraft(); select(sel); queueThumbs(CUTS.filter(c => c.tag).map(c => c.id)); });
+    initPrev();
     if ('IntersectionObserver' in window) new IntersectionObserver(es => { stageVisible = es[0].isIntersecting; }).observe($('stage'));
     document.addEventListener('visibilitychange', () => { if (document.hidden && busy) wentHidden = true; });
     $('make').disabled = false; $('make').addEventListener('click', make);
