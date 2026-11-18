@@ -15,6 +15,23 @@ const LISTS = {}; let VER = null, TAGS = null, HOLD = 0, FULL = 115.2, TAGSEGS =
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const mk = (w, h, o) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return [c, c.getContext('2d', o)]; };
+// ── 카톡 안 화면(앱 안 웹 화면) 판정과 바깥 브라우저로 넘기기. 앱 안 화면에는 공유 창(navigator.share)이 없어 「내 카톡으로 보내기」가 안 나온다.
+// 길 둘: ① kakaotalk://web/openExternal?url= (카톡이 기본 브라우저로 넘김 — 공식 문서에 없는 길, 실기기 확인 전) → 처음 한 번만 저절로 시도
+//        ② intent://…#Intent;scheme=https;package=com.android.chrome;end (안드로이드 크롬 문서의 꼴, 누를 때만) → 「크롬으로 열기」 단추
+// 되돌이 금지: 저절로 넘기기는 탭마다 한 번만(sessionStorage + 주소의 ext=1 표시). 안 먹어도 페이지는 그대로 쓸 수 있다. ?ua=kakao·?dry=1 은 시험용(dry 는 넘기지 않고 적기만).
+const UA = navigator.userAgent, IN_KAKAO = /KAKAOTALK/i.test(UA) || QS.get('ua') === 'kakao', IS_IOS = /iPhone|iPad|iPod/i.test(UA);
+const IN_APP = IN_KAKAO || /;\s*wv\)|NAVER\(inapp|Instagram|FBAN|FBAV|Line\//i.test(UA);
+const NAV_DRY = QS.get('dry') === '1'; window.__navLog = [];
+function pageUrl() { const u = new URL(location.href); for (const k of ['ua', 'dry', 'sec', 'nowc', 'android', 'small', 'vb', 'ab', 'ext']) u.searchParams.delete(k); u.hash = ''; return u.toString(); }
+function navTo(u) { window.__navLog.push(u); if (!NAV_DRY) { try { location.href = u; } catch (e) {} } }
+function openExternal() { navTo('kakaotalk://web/openExternal?url=' + encodeURIComponent(pageUrl())); }
+function openInChrome() { const u = pageUrl(); if (IS_IOS) { if (IN_KAKAO) openExternal(); return; } navTo('intent://' + u.replace(/^https?:\/\//, '') + '#Intent;scheme=' + (u.startsWith('http://') ? 'http' : 'https') + ';package=com.android.chrome;end'); }
+let extTried = false;
+if (IN_KAKAO) {
+  try { extTried = sessionStorage.getItem('cheer-ext-tried') === '1'; sessionStorage.setItem('cheer-ext-tried', '1'); } catch (e) {}
+  if (QS.get('ext') === '1') extTried = true;
+  if (!extTried) { try { const u = new URL(location.href); u.searchParams.set('ext', '1'); history.replaceState(null, '', u.toString()); } catch (e) {} openExternal(); }
+}
 const cv = $('cv'); cv.width = W; cv.height = H; const g = cv.getContext('2d');
 const [fc, fg] = mk(W, H), [hc, hg] = mk(W, H), [pc, pg] = mk(8, 8, { willReadFrequently: true }), [, mg] = mk(8, 8);
 const R = x => { x.setTransform(S, 0, 0, S, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = 'source-over'; };
@@ -267,11 +284,12 @@ async function showResult(res) {
   v.loop = false; v.onended = () => log('결과 영상 끝남(마지막 화면에 머묾, 되감지 않음)'); // 끝나면 마지막 화면에 머문다 — 되돌려 틀지 않는다
   { const d = new Date(), p2 = n => String(n).padStart(2, '0'); outName = OUT_NAME + '_' + p2(d.getHours()) + p2(d.getMinutes()) + '.' + outExt; }
   const file = (() => { try { return new File([outBlob], outName, { type: outBlob.type || 'video/mp4' }); } catch (e) { return null; } })();
-  let canShare = false; try { canShare = !!(file && navigator.canShare && navigator.canShare({ files: [file] })); } catch (e) {}
+  let canShare = false, shareWhy = ''; try { canShare = !!(file && navigator.canShare && navigator.canShare({ files: [file] })); } catch (e) { shareWhy = e.name || e.message; }
+  log('공유 판정: share ' + typeof navigator.share + ' · canShare ' + typeof navigator.canShare + ' · canShare(영상 파일) ' + canShare + (shareWhy ? '(' + shareWhy + ')' : '') + ' · 카톡 안 화면 ' + IN_KAKAO + ' · 앱 안 화면 ' + IN_APP);
   let dl = null; try { dl = await window.claude?.use?.('downloads'); } catch (e) {}
   const canSave = !!dl || !window.claude; // claude 자리인데 downloads 가 없으면 저장 단추 없음(길게 눌러 저장)
   log('보내기(공유 창): ' + (canShare ? '됨' : '안 됨') + ' · 저장: ' + (dl ? 'downloads' : (canSave ? '내려받기 링크' : '없음')));
-  const bs = $('share'), bv = $('save'); bs.hidden = !canShare; bv.hidden = !canSave; bv.classList.toggle('second', canShare); $('holdhint').hidden = canShare || canSave; $('sharehint').hidden = !canShare;
+  const bs = $('share'), bv = $('save'); bs.hidden = !canShare; bv.hidden = !canSave; bv.classList.toggle('second', canShare); $('holdhint').hidden = canShare || canSave; $('sharehint').hidden = !canShare; $('noshare').hidden = canShare || !IN_APP;
   bs.onclick = async () => { try { await navigator.share({ files: [file] }); log('보내기: 공유 창 닫힘(보냄)'); next('보냈습니다.'); } catch (e) { log('보내기: ' + (e.name || e.message)); if (e.name !== 'AbortError') { next('보내기가 되지 않았습니다. 아래 「이 폰에 저장」을 눌러 주세요.', true); bv.classList.remove('second'); } } };
   bv.onclick = async () => {
     const name = outName;
@@ -441,6 +459,8 @@ async function init() {
     log('기기: ' + navigator.userAgent);
     log('VideoEncoder: ' + ('VideoEncoder' in window) + ' · AudioEncoder: ' + ('AudioEncoder' in window) + ' · MediaRecorder: ' + ('MediaRecorder' in window) + ' · 묶는 도구: ' + (typeof Mp4Muxer !== 'undefined') + ' · 자간: ' + HASLS);
     if (!('VideoEncoder' in window) || new URLSearchParams(location.search).get('nowc')) $('nowc').hidden = false; // 카톡 안 화면처럼 영상 담는 도구가 없는 곳: 맨 위에 다른 브라우저로 열라는 안내(?nowc=1 은 시험용)
+    log('화면: ' + (IN_KAKAO ? '카톡 안 화면' : (IN_APP ? '앱 안 화면' : '보통 브라우저')) + ' · 크롬 판 ' + ((UA.match(/Chrome\/(\d+)/) || [])[1] || '?') + ' · share ' + typeof navigator.share + ' · canShare ' + typeof navigator.canShare + (IN_KAKAO ? ' · 바깥 브라우저로 넘기기 ' + (extTried ? '이미 한 번 시도함(다시 안 함)' : '한 번 시도') : ''));
+    { const lab = IS_IOS ? '사파리로 열기' : '크롬으로 열기'; for (const id of ['openChrome', 'openChrome2']) { $(id).textContent = lab; $(id).addEventListener('click', () => { log('「' + lab + '」 누름'); openInChrome(); }); } $('inapp').hidden = !IN_APP; }
     let want = new URLSearchParams(location.search).get('ver'); if (!want) { try { want = localStorage.getItem(VER_KEY); } catch (e) {} }
     await loadVersion(want || 'mom1');
     for (const b of document.querySelectorAll('#pick button[data-ver]')) b.addEventListener('click', () => { if (busy || b.dataset.ver === VER) return; loadVersion(b.dataset.ver).catch(e => { setCap('그 판을 불러오지 못했습니다.'); log('판 불러오기 실패: ' + (e.message || e.name)); }); });

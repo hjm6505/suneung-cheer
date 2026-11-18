@@ -85,6 +85,10 @@ progress{width:100%;height:12px;accent-color:var(--amber)}
 .prevhead h2{flex:1;margin:0;font-size:19px}
 .prevvideo{display:block;align-self:center;width:auto;max-width:100%;height:calc(100vh - 210px);height:calc(100dvh - 210px);min-height:240px;aspect-ratio:9/16;border-radius:12px;background:#000}
 .prevfoot{padding-block:4px 14px;max-width:520px;width:100%;margin:0 auto}
+.inappbox{display:flex;flex-direction:column;gap:10px;width:100%;background:var(--ember);border:2px solid var(--amber);border-radius:12px;padding:14px 16px}
+.inappbox p{color:var(--paper);font-size:18px;line-height:1.5}
+.inappbox strong{color:var(--amber)}
+.inappbox p.small{font-size:16px;color:var(--ash)}
 .alertbox{font-size:19px;line-height:1.5;font-weight:600;color:#2a1d08;background:var(--warn);border-radius:12px;padding:14px 16px}
 .tagl{display:flex;flex-direction:column;gap:2px}
 .tagtoggle{align-self:flex-start;margin-top:4px}
@@ -104,6 +108,11 @@ p.lead{color:var(--paper);font-size:17px}
 <body>
 <main>
   <div id="nowc" class="alertbox" role="alert" hidden>이 화면에서는 영상을 만들 수 없습니다. 오른쪽 위 ⋮ → 다른 브라우저(크롬)로 열기를 눌러 주세요.</div>
+  <div id="inapp" class="inappbox" hidden>
+    <p>카톡 안 화면입니다. 여기서는 만든 영상을 바로 보낼 수 없습니다.<br><strong>먼저 크롬으로 열어 주세요.</strong></p>
+    <button id="openChrome" type="button" class="wide">크롬으로 열기</button>
+    <p class="small">안 열리면 오른쪽 위 ⋮ → 「다른 브라우저로 열기」를 눌러 주세요.</p>
+  </div>
   <h1>수능 응원 영상 편집하기</h1>
   <p class="lead">그림을 누르면 미리보기 영상이 틀어집니다. 끝까지 보고 마음에 드는 것을 고르세요.</p>
   <div id="pick" role="group" aria-label="영상 고르기 — 그림을 누르면 미리보기 영상이 틀어집니다">
@@ -147,11 +156,16 @@ p.lead{color:var(--paper);font-size:17px}
 
   <div class="stage" id="result" hidden>
     <h2 id="resTitle" tabindex="-1">영상이 다 됐습니다</h2>
-    <button id="share" type="button" class="wide" hidden>카톡 등으로 바로 보내기</button>
-    <p id="sharehint" hidden>이 단추가 가장 쉽습니다. 저장하지 않고 바로 보냅니다.</p>
+    <button id="share" type="button" class="wide" hidden>내 카톡으로 보내기</button>
+    <p id="sharehint" hidden>누른 뒤 카카오톡 → 나와의 채팅(또는 보낼 방)을 고르세요. 저장하지 않고 바로 보냅니다.</p>
     <video id="out" class="out big" controls playsinline></video>
     <button id="sound" type="button" hidden>소리 켜기</button>
     <div class="cap" id="outcap"></div>
+    <div id="noshare" class="inappbox" hidden>
+      <p>이 화면에서는 바로 보내기가 안 됩니다. <strong>크롬으로 열면 됩니다.</strong></p>
+      <button id="openChrome2" type="button" class="ghost">크롬으로 열기</button>
+      <p class="small">크롬으로 넘어가면 방금 만든 영상은 사라집니다. 거기서 다시 만들어야 합니다. 지금 영상은 아래 「이 폰에 저장」으로 받을 수 있습니다.</p>
+    </div>
     <button id="save" type="button" class="wide" hidden>이 폰에 저장</button>
     <div id="next" role="status" hidden></div>
     <p id="holdhint" hidden>위 영상을 길게 누르면 저장할 수 있습니다.</p>
@@ -174,7 +188,7 @@ p.lead{color:var(--paper);font-size:17px}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.min.js"></script>
-<script src="scene.js?v=4"></script>
-<script src="app.js?v=4"></script>
+<script src="scene.js?v=5"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
